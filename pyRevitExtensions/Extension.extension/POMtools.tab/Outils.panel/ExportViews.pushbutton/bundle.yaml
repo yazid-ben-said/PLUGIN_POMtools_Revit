@@ -1,6 +1,6 @@
 title:
-  fr_fr: JSON IFC
-  en_us: IFC JSON
+  fr_fr: JSON Export
+  en_us: Export JSON
 tooltip:
   en_us : |
     This tool can export one ore multiple revit views to JSON files. 

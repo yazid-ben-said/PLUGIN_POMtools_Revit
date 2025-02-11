@@ -8,7 +8,7 @@ import sys
 import codecs
 
 __title__ = 'Export\nViews to JSON'
-__author__ = 'Yazid'
+__author__ = 'Yazid Ben Said'
 __doc__ = 'Exports selected views data to JSON'
 
 logger = script.get_logger()
@@ -185,8 +185,8 @@ def main():
        view_options = sorted([v.Name for v in valid_views])  # Sort views alphabetically
        selected_views = forms.SelectFromList.show(
            view_options,
-           title='Select Views to Export',
-           button_name='Export to JSON',
+           title='Selectionner les vues à exporter',
+           button_name='Exporter en JSON',
            multiselect=True,
            width=500,
            height=600

@@ -33,47 +33,76 @@ def get_parameter_value(param):
 
 def get_element_data(element):
    """Extract relevant data from an element."""
-   element_data = {
-       "id": element.Id.IntegerValue,
-       "category": element.Category.Name if element.Category else "Uncategorized",
-       "family_name": element.Symbol.Family.Name if hasattr(element, 'Symbol') else None,
-       "type_name": element.Name if hasattr(element, 'Name') else None,
-       "parameters": {}
-   }
-   
-   # Get all parameters
-   for param in element.Parameters:
-       if param.Definition:
-           param_value = get_parameter_value(param)
-           if param_value is not None:
-               element_data["parameters"][param.Definition.Name] = param_value
-   
-   # Get location data if available
    try:
-       location = element.Location
-       if location:
-           if isinstance(location, DB.LocationPoint):
-               point = location.Point
-               element_data["location"] = {
-                   "x": point.X,
-                   "y": point.Y,
-                   "z": point.Z
-               }
-           elif isinstance(location, DB.LocationCurve):
-               curve = location.Curve
-               start = curve.GetEndPoint(0)
-               end = curve.GetEndPoint(1)
-               element_data["location"] = {
-                   "start_point": {"x": start.X, "y": start.Y, "z": start.Z},
-                   "end_point": {"x": end.X, "y": end.Y, "z": end.Z}
-               }
-   except:
-       pass
-   
-   return element_data
+       # Base element data
+       element_data = {
+           "id": element.Id.IntegerValue,
+           "category": element.Category.Name if element.Category else "Uncategorized",
+           "type_name": element.Name if hasattr(element, 'Name') else None,
+           "parameters": {}
+       }
+
+       # Handle family name differently for different element types
+       try:
+           if isinstance(element, DB.TextNote):
+               element_data["family_name"] = "Text Note"
+               # Add text specific data
+               element_data["text_content"] = element.Text
+           elif isinstance(element, DB.Dimension):
+               element_data["family_name"] = "Dimension"
+           elif hasattr(element, 'Symbol') and element.Symbol:
+               element_data["family_name"] = element.Symbol.Family.Name
+           else:
+               element_data["family_name"] = None
+       except:
+           element_data["family_name"] = None
+       
+       # Get all parameters
+       for param in element.Parameters:
+           if param.Definition:
+               param_value = get_parameter_value(param)
+               if param_value is not None:
+                   element_data["parameters"][param.Definition.Name] = param_value
+       
+       # Get location data if available
+       try:
+           location = element.Location
+           if location:
+               if isinstance(location, DB.LocationPoint):
+                   point = location.Point
+                   element_data["location"] = {
+                       "x": point.X,
+                       "y": point.Y,
+                       "z": point.Z
+                   }
+               elif isinstance(location, DB.LocationCurve):
+                   curve = location.Curve
+                   start = curve.GetEndPoint(0)
+                   end = curve.GetEndPoint(1)
+                   element_data["location"] = {
+                       "start_point": {"x": start.X, "y": start.Y, "z": start.Z},
+                       "end_point": {"x": end.X, "y": end.Y, "z": end.Z}
+                   }
+       except:
+           pass
+       
+       return element_data
+   except Exception as ex:
+       logger.error("Error processing element: {}".format(str(ex)))
+       return None
 
 def get_view_data(view, doc):
    """Extract all data from the given view."""
+   try:
+       discipline = str(view.Discipline) if hasattr(view, 'Discipline') else "Unknown"
+   except:
+       discipline = "Unknown"
+       
+   try:
+       detail_level = str(view.DetailLevel) if hasattr(view, 'DetailLevel') else "Unknown"
+   except:
+       detail_level = "Unknown"
+
    view_data = {
        "id": view.Id.IntegerValue,
        "name": view.Name,
@@ -81,30 +110,36 @@ def get_view_data(view, doc):
        "scale": view.Scale,
        "level": view.GenLevel.Name if hasattr(view, 'GenLevel') and view.GenLevel else None,
        "template": view.ViewTemplateId.IntegerValue if hasattr(view, 'ViewTemplateId') else None,
-       "detail_level": str(view.DetailLevel),
-       "discipline": str(view.Discipline),
+       "detail_level": detail_level,
+       "discipline": discipline,
        "elements": []
    }
    
    # Get all visible elements in the view
-   collector = DB.FilteredElementCollector(doc, view.Id)\
-                .WhereElementIsNotElementType()\
-                .ToElements()
-   
-   # Group elements by category
-   categorized_elements = defaultdict(list)
-   for element in collector:
-       if element.Category:
-           categorized_elements[element.Category.Name].append(element)
-   
-   # Process elements by category
-   for category, elements in categorized_elements.items():
-       category_data = {
-           "category": category,
-           "elements": [get_element_data(elem) for elem in elements]
-       }
-       view_data["elements"].append(category_data)
-   
+   try:
+       collector = DB.FilteredElementCollector(doc, view.Id)\
+                    .WhereElementIsNotElementType()\
+                    .ToElements()
+       
+       # Group elements by category
+       categorized_elements = defaultdict(list)
+       for element in collector:
+           if element and element.Category:
+               element_data = get_element_data(element)
+               if element_data:
+                   categorized_elements[element.Category.Name].append(element_data)
+       
+       # Process elements by category
+       for category, elements in categorized_elements.items():
+           category_data = {
+               "category": category,
+               "elements": elements
+           }
+           view_data["elements"].append(category_data)
+   except Exception as ex:
+       logger.error("Error collecting elements from view: {}".format(str(ex)))
+       view_data["elements"] = []
+       
    return view_data
 
 def export_views_to_json(views_data, folder_path):

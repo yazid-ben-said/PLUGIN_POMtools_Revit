@@ -1,0 +1,17 @@
+{
+    "extensions": [
+        {
+            "builtin": "False",
+            "type": "extension",
+            "rocket_mode_compatible": "True",
+            "name": "Extension - export JSON",
+            "description": "",
+            "author": "Yazid Ben Said",
+            "author_profile": "",
+            "url": "",
+            "website": "",
+            "image": "",
+            "dependencies": []
+        }
+    ]
+}

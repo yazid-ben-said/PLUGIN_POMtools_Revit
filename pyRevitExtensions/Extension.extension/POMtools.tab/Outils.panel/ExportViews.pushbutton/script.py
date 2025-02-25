@@ -8,8 +8,8 @@ import sys
 import codecs
 
 __title__ = 'Export\nViews to JSON'
-__author__ = 'Yazid Ben Said'
-__doc__ = 'Exports selected views data to JSON'
+__author__ = 'Yazid'
+__doc__ = 'Exports selected views to JSON from active or selected Revit files'
 
 logger = script.get_logger()
 output = script.get_output()
@@ -46,7 +46,6 @@ def get_element_data(element):
        try:
            if isinstance(element, DB.TextNote):
                element_data["family_name"] = "Text Note"
-               # Add text specific data
                element_data["text_content"] = element.Text
            elif isinstance(element, DB.Dimension):
                element_data["family_name"] = "Dimension"
@@ -115,13 +114,11 @@ def get_view_data(view, doc):
        "elements": []
    }
    
-   # Get all visible elements in the view
    try:
        collector = DB.FilteredElementCollector(doc, view.Id)\
                     .WhereElementIsNotElementType()\
                     .ToElements()
        
-       # Group elements by category
        categorized_elements = defaultdict(list)
        for element in collector:
            if element and element.Category:
@@ -129,7 +126,6 @@ def get_view_data(view, doc):
                if element_data:
                    categorized_elements[element.Category.Name].append(element_data)
        
-       # Process elements by category
        for category, elements in categorized_elements.items():
            category_data = {
                "category": category,
@@ -142,100 +138,142 @@ def get_view_data(view, doc):
        
    return view_data
 
-def export_views_to_json(views_data, folder_path):
+def export_views_to_json(views_data, folder_path, file_name=""):
    """Export multiple views data to JSON files."""
-   # Create the folder if it doesn't exist
    if not os.path.exists(folder_path):
        os.makedirs(folder_path)
    
-   # Export each view to a separate JSON file
+   exported_files = []
    for view_name, view_data in views_data.items():
        try:
-           # Create safe filename
            safe_filename = "".join([c for c in view_name if c.isalnum() or c in (' ','-','_')]).rstrip()
+           if file_name:
+               safe_filename = file_name + "_" + safe_filename
            filepath = os.path.join(folder_path, safe_filename + ".json")
            
-           # Export to JSON with proper formatting and encoding
            with codecs.open(filepath, 'w', encoding='utf-8') as f:
                json_str = json.dumps(view_data, indent=4, ensure_ascii=False)
                f.write(json_str)
+           exported_files.append(filepath)
        except Exception as ex:
            output.print_md("Error exporting view {}: {}".format(view_name, str(ex)))
            continue
+   return exported_files
+
+def process_document(doc, export_folder, file_name=""):
+   """Process a single document and export selected views."""
+   # Get all valid views
+   views = DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements()
+   valid_views = [v for v in views if 
+                 not v.IsTemplate and
+                 v.CanBePrinted and
+                 v.ViewType not in [DB.ViewType.Schedule, DB.ViewType.Undefined]]
+   
+   if not valid_views:
+       output.print_md("No valid views found in document: {}".format(doc.Title))
+       return []
+   
+   # Show view selection dialog
+   view_options = sorted([v.Name for v in valid_views])
+   selected_views = forms.SelectFromList.show(
+       view_options,
+       title='Sélectionner les vues à exporter: {}'.format(doc.Title),
+       button_name='Exporter en JSON',
+       multiselect=True,
+       width=500,
+       height=600
+   )
+   
+   if not selected_views:
+       return []
+   
+   views_to_export = [v for v in valid_views if v.Name in selected_views]
+   views_data = {}
+   
+   # Process views with progress bar
+   with forms.ProgressBar() as pb:
+       total_views = len(views_to_export)
+       for idx, view in enumerate(views_to_export):
+           pb.update_progress(idx, max_value=total_views)
+           output.print_md("Processing view: **{}**".format(view.Name))
+           views_data[view.Name] = get_view_data(view, doc)
+   
+   return export_views_to_json(views_data, export_folder, file_name)
+
+def select_export_mode():
+   """Let user select export mode."""
+   options = {
+       'Exporter un document actif': 'active',
+       'Exporter d\'autres fichiers Revit': 'files'
+   }
+   selected_option = forms.CommandSwitchWindow.show(
+       options.keys(),
+       message='Sélectionner le mode d\'export:'
+   )
+   return options.get(selected_option)
 
 def main():
    try:
-       # Get current document
-       doc = revit.doc
-       
-       # Get all valid views
-       views = DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements()
-       
-       # Filter views: exclude templates, schedules, and undefined views
-       valid_views = [v for v in views if 
-                     not v.IsTemplate and
-                     v.CanBePrinted and
-                     v.ViewType not in [DB.ViewType.Schedule, DB.ViewType.Undefined]]
-       
-       if not valid_views:
-           forms.alert('No valid views found in the document.')
+       # Let user choose mode
+       mode = select_export_mode()
+       if not mode:
            return
-       
-       # Show view selection dialog with checkboxes
-       view_options = sorted([v.Name for v in valid_views])  # Sort views alphabetically
-       selected_views = forms.SelectFromList.show(
-           view_options,
-           title='Selectionner les vues à exporter',
-           button_name='Exporter en JSON',
-           multiselect=True,
-           width=500,
-           height=600
-       )
-       
-       if not selected_views:
-           return
-       
-       # Get the actual view objects from the selected names
-       views_to_export = [v for v in valid_views if v.Name in selected_views]
-       
+
        # Let user select export folder
        export_folder = forms.pick_folder()
        if not export_folder:
            return
+
+       exported_files = []
        
-       views_data = {}
-       
-       # Setup progress bar
-       total_views = len(views_to_export)
-       with forms.ProgressBar() as pb:
-           # Process each view
-           for idx, view in enumerate(views_to_export):
-               # Update progress
-               pb.update_progress(idx, max_value=total_views)
-               output.print_md("Processing view: **{}**".format(view.Name))
-               
-               views_data[view.Name] = get_view_data(view, doc)
-           
-           # Export all views
-           export_views_to_json(views_data, export_folder)
-       
-       # Show success message with export details
-       message = 'Export completed successfully!'
-       details = 'Files saved to:\n' + export_folder + '\n\nExported views:\n'
-       details += '\n'.join(['- ' + view for view in selected_views])
-       
-       forms.alert(
-           message,
-           sub_msg=details
-       )
+       if mode == 'active':
+           # Process active document
+           doc = revit.doc
+           file_name = doc.Title.replace('.rvt', '')
+           exported_files = process_document(doc, export_folder, file_name)
+       else:
+                   # Let user select Revit files
+                   file_paths = forms.pick_file(
+                       file_ext='rvt',
+                       multi_file=True,
+                       title='Sélectionner les fichiers Revit à exporter'
+                   )
+                   
+                   if not file_paths:
+                       return
+        
+                   # Get application handle
+                   app = __revit__.Application
+        
+                   total_files = len(file_paths)
+                   with forms.ProgressBar() as pb:
+                       for idx, file_path in enumerate(file_paths):
+                           pb.update_progress(idx, max_value=total_files)
+                           file_name = os.path.splitext(os.path.basename(file_path))[0]
+                           output.print_md("Processing file: **{}** ({}/{})".format(
+                               file_name, idx + 1, total_files))
+                           
+                           try:
+                               doc = app.OpenDocumentFile(file_path)
+                               exported = process_document(doc, export_folder, file_name)
+                               exported_files.extend(exported)
+                               doc.Close(False)
+                           except Exception as ex:
+                               logger.error("Error processing file {}: {}".format(file_path, str(ex)))
+                               continue
+
+       if exported_files:
+           message = 'Export completed successfully.'
+           details = 'Files saved to:\n' + export_folder + '\n\nExported files:\n'
+           details += '\n'.join(['- ' + os.path.basename(f) for f in exported_files])
+           forms.alert(message, sub_msg=details)
+       else:
+           forms.alert('No files were exported.')
        
    except:
        error_msg = str(sys.exc_info()[1])
        logger.error(error_msg)
-       forms.alert(
-           'An error occurred during export.',
-           sub_msg=error_msg
-       )
+       forms.alert('An error occurred during export.', sub_msg=error_msg)
 
 if __name__ == '__main__':
    main()

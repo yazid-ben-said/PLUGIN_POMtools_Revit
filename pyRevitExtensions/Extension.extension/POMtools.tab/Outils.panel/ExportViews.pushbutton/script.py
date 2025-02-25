@@ -220,7 +220,9 @@ def main():
            return
 
        # Let user select export folder
-       export_folder = forms.pick_folder()
+       export_folder = forms.pick_folder(
+            title='Sélectionner un dossier de destination pour l\'export'
+       )
        if not export_folder:
            return
 

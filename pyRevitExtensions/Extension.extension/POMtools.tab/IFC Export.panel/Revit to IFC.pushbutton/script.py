@@ -8,7 +8,7 @@ import codecs
 from System.Collections.Generic import List
 
 __title__ = 'Export\nViews to IFC\n(Document Actif)'
-__author__ = 'Yazid'
+__author__ = 'Yazid Ben Said'
 __doc__ = 'Exports selected views to IFC 2x3 - VUE de coordination 2.0 from active Revit document'
 
 logger = script.get_logger()
@@ -117,7 +117,7 @@ def apply_ifc_config_to_options(config_data, ifc_options):
         logger.error("Error applying IFC configuration: {}".format(str(ex)))
         return False
 
-def export_view_to_ifc(doc, view, export_folder, file_name, config_file=None, use_active_view_only=False):
+def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_only=False):
     """Export a view to IFC format."""
     try:
         # Create IFC export options with default settings first
@@ -148,14 +148,11 @@ def export_view_to_ifc(doc, view, export_folder, file_name, config_file=None, us
         # Set the view to export
         ifc_options.FilterViewId = view.Id
         
-        # Create export filename
+        # Create export filename - just the view name
         safe_viewname = "".join([c for c in view.Name if c.isalnum() or c in (' ','-','_')]).rstrip()
-        if file_name:
-            safe_filename = file_name + "_" + safe_viewname
-        else:
-            safe_filename = safe_viewname
+        safe_filename = safe_viewname
             
-        filepath = os.path.join(export_folder, safe_filename + ".ifc")
+        filepath = os.path.join(doc_folder, safe_filename + ".ifc")
         
         # Start a transaction to allow document modifications
         with DB.Transaction(doc, "IFC Export") as t:
@@ -163,13 +160,15 @@ def export_view_to_ifc(doc, view, export_folder, file_name, config_file=None, us
             
             try:
                 # Execute the export
-                result = doc.Export(export_folder, safe_filename, ifc_options)
+                result = doc.Export(doc_folder, safe_filename, ifc_options)
                 t.Commit()
                 
                 if result:
+                    output.print_md("Vue **{}** exportée avec succès!".format(view.Name))
                     return filepath
                 else:
                     logger.error("IFC export failed for view: {}".format(view.Name))
+                    output.print_md("**ÉCHEC** de l'export pour la vue: {}".format(view.Name))
                     return None
             except Exception as export_ex:
                 # If export fails, roll back the transaction
@@ -181,8 +180,14 @@ def export_view_to_ifc(doc, view, export_folder, file_name, config_file=None, us
         logger.error("Error exporting view to IFC: {}".format(str(ex)))
         return None
 
-def process_document(doc, export_folder, config_file=None, file_name="", use_active_view_only=False):
+def process_document(doc, export_folder, config_file=None, use_active_view_only=False):
     """Process a single document and export selected views to IFC."""
+    # Create specific folder for this document
+    file_name = doc.Title.replace('.rvt', '')
+    doc_folder = os.path.join(export_folder, file_name)
+    if not os.path.exists(doc_folder):
+        os.makedirs(doc_folder)
+        
     # Get all valid views
     views = DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements()
     valid_views = [v for v in views if 
@@ -219,7 +224,7 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
             output.print_md("Export de la vue: **{}**".format(view.Name))
             
             try:
-                exported_file = export_view_to_ifc(doc, view, export_folder, file_name, config_file, use_active_view_only)
+                exported_file = export_view_to_ifc(doc, view, doc_folder, config_file, use_active_view_only)
                 if exported_file:
                     exported_files.append(exported_file)
             except Exception as ex:
@@ -273,13 +278,14 @@ def main():
 
         # Process active document
         doc = revit.doc
-        file_name = doc.Title.replace('.rvt', '')
-        exported_files = process_document(doc, export_folder, config_file, file_name, use_active_view_only)
+        exported_files = process_document(doc, export_folder, config_file, use_active_view_only)
 
         if exported_files:
+            file_name = doc.Title.replace('.rvt', '')
+            doc_folder = os.path.join(export_folder, file_name)
+            
             message = 'Export IFC terminé avec succès.'
-            details = 'Fichiers enregistrés dans:\n' + export_folder + '\n\nFichiers exportés:\n'
-            details += '\n'.join(['- ' + os.path.basename(f) for f in exported_files])
+            details = 'Fichiers enregistrés dans:\n' + doc_folder + '\n\nNombre de vues exportées: {}'.format(len(exported_files))
             forms.alert(message, sub_msg=details)
         else:
             forms.alert('Aucun fichier n\'a été exporté.')

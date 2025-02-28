@@ -8,7 +8,7 @@ import codecs
 from System.Collections.Generic import List
 
 __title__ = 'Export\nViews to IFC\n(Autres Fichiers)'
-__author__ = 'Yazid'
+__author__ = 'Yazid Ben Said'
 __doc__ = 'Exports selected views to IFC 2x3 - VUE de coordination 2.0 from other Revit files'
 
 logger = script.get_logger()
@@ -155,25 +155,46 @@ def open_and_process_revit_files(file_paths, export_folder, config_file=None, us
                 open_options.DetachFromCentralOption = DB.DetachFromCentralOption.DetachAndPreserveWorksets
                 
                 output.print_md("Ouverture du fichier...")
-                doc = app.OpenDocumentFile(file_path, open_options)
+                # Convert string path to ModelPath object required by Revit API
+                model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
+                doc = app.OpenDocumentFile(model_path, open_options)
                 
                 # Process this document
                 output.print_md("Fichier ouvert. Sélection des vues...")
-                this_file_exports = process_document(doc, export_folder, config_file, file_name, use_active_view_only)
+                try:
+                    this_file_exports = process_document(doc, export_folder, config_file, file_name, use_active_view_only)
+                    
+                    if this_file_exports:
+                        exported_files.extend(this_file_exports)
+                        successful_files += 1
+                        output.print_md("**Export terminé** pour {}. {} vues exportées.".format(
+                            file_name, len(this_file_exports)))
+                    else:
+                        output.print_md("Aucune vue n'a été exportée pour {}".format(file_name))
+                        failed_files.append(file_name + " (aucune vue exportée)")
+                    
+                    # Check if the document is a linked file
+                    is_linked = False
+                    try:
+                        # Try creating and immediately rolling back a transaction to test
+                        test_transaction = DB.Transaction(doc, "Test Transaction")
+                        test_transaction.Start()
+                        test_transaction.RollBack()
+                    except Exception:
+                        # If transaction fails, it's a linked file
+                        is_linked = True
+                    
+                    # Close document only if it's not a linked file
+                    if not is_linked:
+                        output.print_md("Fermeture du fichier...")
+                        doc.Close(False)
+                        output.print_md("Fichier fermé.")
+                    else:
+                        output.print_md("Le fichier est détecté comme lié, pas besoin de fermeture explicite.")
                 
-                if this_file_exports:
-                    exported_files.extend(this_file_exports)
-                    successful_files += 1
-                    output.print_md("**Export terminé** pour {}. {} vues exportées.".format(
-                        file_name, len(this_file_exports)))
-                else:
-                    output.print_md("Aucune vue n'a été exportée pour {}".format(file_name))
-                    failed_files.append(file_name + " (aucune vue exportée)")
-                
-                # Close document without saving
-                output.print_md("Fermeture du fichier...")
-                doc.Close(False)
-                output.print_md("Fichier fermé.")
+                except Exception as process_ex:
+                    output.print_md("**ERREUR** lors du traitement du document: {}".format(str(process_ex)))
+                    failed_files.append(file_name + " (" + str(process_ex) + ")")
                 
             except Exception as ex:
                 output.print_md("**ERREUR** lors du traitement de {}: {}".format(file_name, str(ex)))
@@ -224,7 +245,28 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
     views_to_export = [v for v in valid_views if v.Name in selected_views]
     exported_files = []
     
-    # Process views with progress bar
+    # Check if the document is a linked file or not (for transaction handling)
+    try:
+        # Try creating and immediately rolling back a transaction to test
+        test_transaction = DB.Transaction(doc, "Test Transaction")
+        test_transaction.Start()
+        test_transaction.RollBack()
+        is_linked_file = False
+    except Exception:
+        # If transaction fails, it's a linked file
+        is_linked_file = True
+        forms.alert(
+            "Fichier détecté comme fichier 'spécial'",
+            sub_msg="Le fichier {} semble avoir un statut particulier dans Revit (fichier central, fichier lié, etc.).\n\n"
+                   "En raison des limitations de l'API Revit, ces fichiers ne peuvent pas être exportés avec cette méthode.\n\n"
+                   "Pour exporter ce fichier :\n"
+                   "1. Fermez ce script\n"
+                   "2. Ouvrez le fichier directement dans Revit (via la commande standard 'Ouvrir')\n"
+                   "3. Utilisez l'outil 'Export Views to IFC (Document Actif)'"
+        )
+        return []
+    
+    # Process views with progress bar (only for regular, non-linked documents)
     with forms.ProgressBar() as pb:
         total_views = len(views_to_export)
         for idx, view in enumerate(views_to_export):
@@ -267,7 +309,7 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
                     
                 filepath = os.path.join(doc_folder, safe_filename + ".ifc")
                 
-                # Start a transaction to allow document modifications
+                # For regular documents, use transaction
                 with DB.Transaction(doc, "IFC Export") as t:
                     t.Start()
                     
@@ -278,8 +320,9 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
                         
                         if result:
                             exported_files.append(filepath)
+                            output.print_md("Vue exportée avec succès!")
                         else:
-                            logger.error("IFC export failed for view: {}".format(view.Name))
+                            output.print_md("**Export échoué** pour cette vue.")
                     except Exception as export_ex:
                         # If export fails, roll back the transaction
                         t.RollBack()
@@ -296,9 +339,8 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
 def config_options():
     """Let user select configuration options."""
     options = {
-        'Utiliser une configuration IFC personnalisée': 'custom',
-        'Utiliser la configuration par défaut': 'default',
-        'Générer une configuration par défaut': 'generate'
+        'Utiliser la configuration IFC 2x3': 'default',
+        'Utiliser une configuration IFC personnalisée (JSON)': 'custom'
     }
     selected_option = forms.CommandSwitchWindow.show(
         options.keys(),
@@ -321,34 +363,6 @@ def main():
             )
             if not config_file:
                 # Fallback to default if no file selected
-                config_option = 'default'
-        elif config_option == 'generate':
-            export_folder = forms.pick_folder(
-                title='Sélectionner un dossier pour enregistrer la configuration IFC par défaut'
-            )
-            if export_folder:
-                default_config_path = os.path.join(export_folder, "default_ifc_config.json")
-                if generate_default_ifc_config(default_config_path):
-                    forms.alert(
-                        'Configuration IFC par défaut générée avec succès',
-                        sub_msg='Fichier enregistré à: {}'.format(default_config_path)
-                    )
-                    # Ask if user wants to use this configuration
-                    use_generated = forms.alert(
-                        'Voulez-vous utiliser cette configuration pour l\'export actuel?',
-                        yes=True, no=True, ok=False
-                    )
-                    if use_generated:
-                        config_file = default_config_path
-                    else:
-                        # Fallback to default if user doesn't want to use generated config
-                        config_option = 'default'
-                else:
-                    forms.alert('Échec de génération de la configuration par défaut.')
-                    # Fallback to default on failure
-                    config_option = 'default'
-            else:
-                # Fallback to default if no folder selected
                 config_option = 'default'
                 
         # Ask about use active view only option

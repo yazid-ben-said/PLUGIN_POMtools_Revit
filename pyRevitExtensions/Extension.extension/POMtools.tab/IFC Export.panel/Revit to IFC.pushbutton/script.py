@@ -9,7 +9,7 @@ from System.Collections.Generic import List
 
 __title__ = 'Export\nViews to IFC\n(Document Actif)'
 __author__ = 'Yazid Ben Said'
-__doc__ = 'Exports selected views to IFC 2x3 - VUE de coordination 2.0 from active Revit document'
+__doc__ = 'Exports selected views to IFC from active Revit document'
 
 logger = script.get_logger()
 output = script.get_output()
@@ -28,39 +28,6 @@ def load_ifc_config_from_json(json_path):
         logger.error("Error loading IFC configuration from JSON: {}".format(str(ex)))
         forms.alert('Erreur de chargement de la configuration IFC.', sub_msg=str(ex))
         return None
-
-def generate_default_ifc_config(filepath):
-    """Generate a default IFC configuration file."""
-    try:
-        default_config = {
-            "IFCVersion": 21,
-            "ExchangeRequirement": 3,
-            "IFCFileType": 0,
-            "SpaceBoundaries": 0,
-            "SplitWallsAndColumns": False,
-            "IncludeSteelElements": True,
-            "ExportBaseQuantities": False,
-            "Export2DElements": False,
-            "ExportLinkedFiles": False,
-            "VisibleElementsOfCurrentView": True,
-            "ExportRoomsInView": False,
-            "ExportInternalRevitPropertySets": True,
-            "ExportIFCCommonPropertySets": False,
-            "TessellationLevelOfDetail": 0.5,
-            "UseActiveViewGeometry": True,
-            "UseFamilyAndTypeNameForReference": False,
-            "Use2DRoomBoundaryForVolume": False,
-            "IncludeSiteElevation": True,
-            "StoreIFCGUID": True
-        }
-        
-        with codecs.open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(default_config, f, indent=2)
-            
-        return True
-    except Exception as ex:
-        logger.error("Error generating default IFC configuration: {}".format(str(ex)))
-        return False
 
 def apply_ifc_config_to_options(config_data, ifc_options):
     """Apply configuration from JSON to IFC export options."""
@@ -117,20 +84,36 @@ def apply_ifc_config_to_options(config_data, ifc_options):
         logger.error("Error applying IFC configuration: {}".format(str(ex)))
         return False
 
-def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_only=False):
+def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_only=False, ifc_version='default'):
     """Export a view to IFC format."""
     try:
-        # Create IFC export options with default settings first
+        # Create IFC export options with settings based on selected version
         ifc_options = DB.IFCExportOptions()
-        ifc_options.FileVersion = DB.IFCVersion.IFC2x3CV2
-        ifc_options.SpaceBoundaryLevel = 0
-        ifc_options.ExportBaseQuantities = False
-        ifc_options.WallAndColumnSplitting = False
         
-        # Default to visible elements of current view
+        if ifc_version == 'ifc4':
+            # IFC4 - Reference View settings
+            ifc_options.FileVersion = DB.IFCVersion.IFC4
+            ifc_options.SpaceBoundaryLevel = 0
+            ifc_options.ExportBaseQuantities = False
+            ifc_options.WallAndColumnSplitting = False
+            
+            # Add IFC4 Reference View specific options
+            ifc_options.AddOption("ExchangeRequirement", "ReferenceView") 
+            ifc_options.AddOption("IFCVersion", "IFC4") 
+            ifc_options.AddOption("ExportBoundingBox", "false")
+            ifc_options.AddOption("UseTypeNameOnlyForIfcType", "true")
+            ifc_options.AddOption("UseOnlyTriangulation", "true")
+        else:
+            # Default IFC 2x3 settings - Coordination View 2.0
+            ifc_options.FileVersion = DB.IFCVersion.IFC2x3CV2
+            ifc_options.SpaceBoundaryLevel = 0
+            ifc_options.ExportBaseQuantities = False
+            ifc_options.WallAndColumnSplitting = False
+        
+        # Default to visible elements of current view for all versions
         ifc_options.AddOption("VisibleElementsOfCurrentView", "true")
         
-        # If active view only is selected, enforce that setting
+        # If active view only is selected, enforce that setting for all versions
         if use_active_view_only:
             ifc_options.AddOption("VisibleElementsOfCurrentView", "true")
             ifc_options.AddOption("ExportLinkedFiles", "false")
@@ -141,7 +124,6 @@ def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_
             config_data = load_ifc_config_from_json(config_file)
             if config_data:
                 apply_ifc_config_to_options(config_data, ifc_options)
-                # If using active view only, override this setting
                 if use_active_view_only:
                     ifc_options.AddOption("VisibleElementsOfCurrentView", "true")
         
@@ -150,7 +132,14 @@ def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_
         
         # Create export filename - just the view name
         safe_viewname = "".join([c for c in view.Name if c.isalnum() or c in (' ','-','_')]).rstrip()
-        safe_filename = safe_viewname
+        
+        # Add a prefix based on IFC version
+        if ifc_version == 'ifc4':
+            prefix = "IFC4_"
+        else:
+            prefix = "IFC2x3_"
+            
+        safe_filename = prefix + safe_viewname
             
         filepath = os.path.join(doc_folder, safe_filename + ".ifc")
         
@@ -164,7 +153,10 @@ def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_
                 t.Commit()
                 
                 if result:
-                    output.print_md("Vue **{}** exportée avec succès!".format(view.Name))
+                    output.print_md("Vue **{}** exportée avec succès en {}!".format(
+                        view.Name, 
+                        "IFC4 - Vue de référence" if ifc_version == 'ifc4' else "IFC 2x3 - Vue de coordination 2.0"
+                    ))
                     return filepath
                 else:
                     logger.error("IFC export failed for view: {}".format(view.Name))
@@ -180,7 +172,7 @@ def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_
         logger.error("Error exporting view to IFC: {}".format(str(ex)))
         return None
 
-def process_document(doc, export_folder, config_file=None, use_active_view_only=False):
+def process_document(doc, export_folder, config_file=None, use_active_view_only=False, ifc_version='default'):
     """Process a single document and export selected views to IFC."""
     # Create specific folder for this document
     file_name = doc.Title.replace('.rvt', '')
@@ -224,12 +216,11 @@ def process_document(doc, export_folder, config_file=None, use_active_view_only=
             output.print_md("Export de la vue: **{}**".format(view.Name))
             
             try:
-                exported_file = export_view_to_ifc(doc, view, doc_folder, config_file, use_active_view_only)
+                exported_file = export_view_to_ifc(doc, view, doc_folder, config_file, use_active_view_only, ifc_version)
                 if exported_file:
                     exported_files.append(exported_file)
             except Exception as ex:
                 output.print_md("Erreur d'export de la vue: **{}** - {}".format(view.Name, str(ex)))
-                # Continue with next view even if one fails
                 continue
     
     return exported_files
@@ -237,7 +228,8 @@ def process_document(doc, export_folder, config_file=None, use_active_view_only=
 def config_options():
     """Let user select configuration options."""
     options = {
-        'Utiliser la configuration IFC 2x3': 'default',
+        'Utiliser la configuration IFC 2x3 - Vue de coordination 2.0': 'default',
+        'Utiliser la configuration IFC 4 - Vue de référence': 'ifc4',
         'Utiliser une configuration IFC personnalisée (JSON)': 'custom'
     }
     selected_option = forms.CommandSwitchWindow.show(
@@ -278,14 +270,22 @@ def main():
 
         # Process active document
         doc = revit.doc
-        exported_files = process_document(doc, export_folder, config_file, use_active_view_only)
+        exported_files = process_document(doc, export_folder, config_file, use_active_view_only, config_option)
 
         if exported_files:
             file_name = doc.Title.replace('.rvt', '')
             doc_folder = os.path.join(export_folder, file_name)
             
+            # Determine IFC version used for message
+            version_text = "IFC 2x3 - Vue de coordination 2.0"
+            if config_option == 'ifc4':
+                version_text = "IFC 4 - Vue de référence"
+            elif config_option == 'custom':
+                version_text = "configuration personnalisée"
+            
             message = 'Export IFC terminé avec succès.'
-            details = 'Fichiers enregistrés dans:\n' + doc_folder + '\n\nNombre de vues exportées: {}'.format(len(exported_files))
+            details = 'Format utilisé: {}\n\nFichiers enregistrés dans:\n{}\n\nNombre de vues exportées: {}'.format(
+                version_text, doc_folder, len(exported_files))
             forms.alert(message, sub_msg=details)
         else:
             forms.alert('Aucun fichier n\'a été exporté.')

@@ -1,0 +1,11 @@
+title:
+  fr_fr: Export Revit à JSON 
+  en_us: Revit to JSON Export
+tooltip:
+  en_us : |
+    This tool can export one ore multiple revit views to JSON files. 
+
+  fr_fr : |
+    Cet outil peut exporter un ou plusieurs Vues Revit en fichiers JSON.
+
+context : zero-doc

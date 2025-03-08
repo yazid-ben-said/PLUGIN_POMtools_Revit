@@ -1,0 +1,11 @@
+title:
+  fr_fr: Revit à IFC Export
+  en_us: Export Revit to IFC
+tooltip:
+  en_us : |
+    This tool can export one ore multiple Revit views to IFC files.
+
+  fr_fr : |
+    Cet outil peut exporter un ou plusieurs Vues Revit en fichiers IFC.
+
+context : zero-doc

@@ -1,0 +1,11 @@
+title:
+  fr_fr: Export Nomenclatures à JSON 
+  en_us: Nomenclature to JSON Export
+tooltip:
+  en_us : |
+    This tool can export one ore multiple revit nomenclatures to JSON files. 
+
+  fr_fr : |
+    Cet outil peut exporter un ou plusieurs nomenclatures Revit en fichiers JSON.
+
+context : zero-doc

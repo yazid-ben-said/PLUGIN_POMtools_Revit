@@ -1,0 +1,11 @@
+title:
+  fr_fr: IFC à JSON Export
+  en_us: Export IFC to JSON
+tooltip:
+  en_us : |
+    This tool can export one ore multiple IFC views to JSON files. 
+
+  fr_fr : |
+    Cet outil peut exporter un ou plusieurs Vues IFC en fichiers JSON.
+
+context : zero-doc

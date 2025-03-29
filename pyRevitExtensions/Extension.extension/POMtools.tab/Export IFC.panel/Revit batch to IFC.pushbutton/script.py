@@ -66,43 +66,61 @@ def apply_ifc_config_to_options(config_data, ifc_options):
     """Apply configuration from JSON to IFC export options."""
     try:
         
-        # 1. IFC version - essential
         if "IFCVersion" in config_data:
             try:
                 if config_data["IFCVersion"] == 21:
                     ifc_options.FileVersion = DB.IFCVersion.IFC2x3CV2
-                elif config_data["IFCVersion"] == 23:
+                elif config_data["IFCVersion"] == 23 or config_data["IFCVersion"] == 25: 
                     ifc_options.FileVersion = DB.IFCVersion.IFC4
             except Exception as ex:
                 logger.warning("Could not set IFC version: {}".format(str(ex)))
         
-        # 2. Space boundaries - essential
+
         if "SpaceBoundaries" in config_data:
             try:
                 ifc_options.SpaceBoundaryLevel = config_data["SpaceBoundaries"]
             except Exception as ex:
                 logger.warning("Could not set space boundaries: {}".format(str(ex)))
         
-        # 3. Wall and column splitting - essential
         if "SplitWallsAndColumns" in config_data:
             try:
                 ifc_options.WallAndColumnSplitting = config_data["SplitWallsAndColumns"]
             except Exception as ex:
                 logger.warning("Could not set wall and column splitting: {}".format(str(ex)))
         
-        # 4. Base quantities - essential
         if "ExportBaseQuantities" in config_data:
             try:
                 ifc_options.ExportBaseQuantities = config_data["ExportBaseQuantities"]
             except Exception as ex:
                 logger.warning("Could not set base quantities: {}".format(str(ex)))
+                
+        if "ExportRoomsInView" in config_data:
+            try:
+                ifc_options.AddOption("ExportRoomsInView", str(config_data["ExportRoomsInView"]).lower())
+            except Exception as ex:
+                logger.warning("Could not set ExportRoomsInView: {}".format(str(ex)))
+
+        if "ExportSolidModelRep" in config_data:
+            try:
+                ifc_options.AddOption("ExportSolidModelRep", str(config_data["ExportSolidModelRep"]).lower())
+            except Exception as ex:
+                logger.warning("Could not set ExportSolidModelRep: {}".format(str(ex)))
+                
+        if "ExcludeFilter" in config_data:
+            try:
+                ifc_options.AddOption("ExcludeFilter", config_data["ExcludeFilter"])
+            except Exception as ex:
+                logger.warning("Could not set ExcludeFilter: {}".format(str(ex)))
         
-        # Use simplified option mapping to reduce potential errors
         simple_options = {
             "VisibleElementsOfCurrentView": lambda x: str(x).lower(),
             "Export2DElements": lambda x: str(x).lower(),
             "ExportLinkedFiles": lambda x: str(x).lower(),
-            "UseActiveViewGeometry": lambda x: str(x).lower()
+            "UseActiveViewGeometry": lambda x: str(x).lower(),
+            "ExportIFCCommonPropertySets": lambda x: str(x).lower(),
+            "Use2DRoomBoundaryForVolume": lambda x: str(x).lower(),
+            "UseOnlyTriangulation": lambda x: str(x).lower(),
+            "UseTypeNameOnlyForIfcType": lambda x: str(x).lower()
         }
         
         # Apply only the most essential options using AddOption
@@ -128,12 +146,20 @@ def open_and_process_revit_files(file_paths, export_folder, config_file=None, us
     app = __revit__.Application
     exported_files = []
     
+    # Determine IFC version text for display
     version_text = "IFC 2x3 - Vue de coordination 2.0"
     if ifc_version == 'ifc4':
         version_text = "IFC 4 - Vue de référence"
-    elif ifc_version == 'custom':
-        version_text = "configuration personnalisée"
-        
+    elif ifc_version == 'custom' and config_file and os.path.exists(config_file):
+        config_data = load_ifc_config_from_json(config_file)
+        if config_data and "IFCVersion" in config_data:
+            if config_data["IFCVersion"] in [23, 25]:
+                version_text = "IFC 4 - Configuration personnalisée"
+            else:
+                version_text = "IFC 2x3 - Configuration personnalisée"
+        else:
+            version_text = "Configuration personnalisée"
+            
     forms.alert(
         'Information importante pour le traitement par lots',
         sub_msg='Ce script va traiter séquentiellement les fichiers Revit sélectionnés.'
@@ -219,6 +245,10 @@ def open_and_process_revit_files(file_paths, export_folder, config_file=None, us
 def process_document(doc, export_folder, config_file=None, file_name="", use_active_view_only=False, ifc_version='default'):
     """Process a single document and export selected views to IFC."""
     # Create specific folder for this document
+    # Remove username if present (after underscore)
+    if '_' in file_name:
+        file_name = file_name.split('_')[0]
+        
     doc_folder = os.path.join(export_folder, file_name)
     if not os.path.exists(doc_folder):
         os.makedirs(doc_folder)
@@ -329,7 +359,13 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
                 safe_viewname = "".join([c for c in view.Name if c.isalnum() or c in (' ','-','_')]).rstrip()
                 
                 # Add a prefix based on IFC version
-                if ifc_version == 'ifc4':
+                is_ifc4 = ifc_version == 'ifc4'
+                if not is_ifc4 and config_file and os.path.exists(config_file):
+                    config_data = load_ifc_config_from_json(config_file)
+                    if config_data and "IFCVersion" in config_data and config_data["IFCVersion"] in [23, 25]:
+                        is_ifc4 = True
+                        
+                if is_ifc4:
                     prefix = "IFC4_"
                 else:
                     prefix = "IFC2x3_"
@@ -348,9 +384,14 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
                         
                         if result:
                             exported_files.append(filepath)
-                            output.print_md("Vue exportée avec succès en {}!".format(
-                                "IFC4 - Vue de référence" if ifc_version == 'ifc4' else "IFC 2x3 - Vue de coordination 2.0"
-                            ))
+                            # Determine version display
+                            version_display = "IFC 2x3 - Vue de coordination 2.0"
+                            if is_ifc4:
+                                version_display = "IFC4 - Vue de référence"
+                            elif config_file:
+                                version_display = "configuration personnalisée"
+                                
+                            output.print_md("Vue exportée avec succès en {}!".format(version_display))
                         else:
                             output.print_md("**Export échoué** pour cette vue.")
                     except Exception as export_ex:
@@ -446,3 +487,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+

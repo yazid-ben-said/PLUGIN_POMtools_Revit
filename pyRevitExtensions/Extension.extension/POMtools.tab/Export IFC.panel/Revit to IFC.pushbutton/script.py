@@ -120,10 +120,10 @@ def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_
             ifc_options.SpaceBoundaryLevel = 0
             ifc_options.ExportBaseQuantities = False
             ifc_options.WallAndColumnSplitting = False
-            
+
             # Add IFC4 Reference View specific options
-            ifc_options.AddOption("ExchangeRequirement", "ReferenceView") 
-            ifc_options.AddOption("IFCVersion", "IFC4") 
+            ifc_options.AddOption("ExchangeRequirement", "ReferenceView")
+            ifc_options.AddOption("IFCVersion", "IFC4")
             ifc_options.AddOption("ExportBoundingBox", "false")
             ifc_options.AddOption("UseTypeNameOnlyForIfcType", "true")
             ifc_options.AddOption("UseOnlyTriangulation", "true")
@@ -133,9 +133,11 @@ def export_view_to_ifc(doc, view, doc_folder, config_file=None, use_active_view_
             ifc_options.SpaceBoundaryLevel = 0
             ifc_options.ExportBaseQuantities = False
             ifc_options.WallAndColumnSplitting = False
-        
+
         # Default to visible elements of current view for all versions
         ifc_options.AddOption("VisibleElementsOfCurrentView", "true")
+        # Export linked models by default — models with only linked files would produce empty IFC otherwise
+        ifc_options.AddOption("ExportLinkedFiles", "true")
         
         # If active view only is selected, enforce that setting for all versions
         if use_active_view_only:

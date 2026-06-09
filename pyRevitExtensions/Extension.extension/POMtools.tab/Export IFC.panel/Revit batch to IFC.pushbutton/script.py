@@ -335,7 +335,9 @@ def process_document(doc, export_folder, config_file=None, file_name="", use_act
                 
                 # Default to visible elements of current view
                 ifc_options.AddOption("VisibleElementsOfCurrentView", "true")
-                
+                # Export linked models by default — models with only linked files would produce empty IFC otherwise
+                ifc_options.AddOption("ExportLinkedFiles", "true")
+
                 # If active view only is selected, enforce that setting
                 if use_active_view_only:
                     ifc_options.AddOption("VisibleElementsOfCurrentView", "true")
